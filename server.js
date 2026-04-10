@@ -1,9 +1,4 @@
-/**
- * HOTCATT ATTENDANCE SYSTEM - COMPLETE BACKEND
- * Deployed on Render.com
- * Includes: Student/Admin login, Attendance marking, Admin management
- */
-
+// server.js - COMPLETE CORRECTED VERSION
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -43,7 +38,8 @@ function verifyToken(req, res, next) {
 
 // ========== ADMIN VERIFICATION MIDDLEWARE ==========
 function verifyAdmin(req, res, next) {
-    if (req.user.role !== 'admin') {
+    // Check if user exists and has admin role
+    if (!req.user || req.user.role !== 'admin') {
         return res.status(403).json({ error: 'Admin access required' });
     }
     next();
@@ -166,7 +162,7 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         const lateTime = '08:30:00';
         const status = currentTime > lateTime ? 'late' : 'present';
         
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('attendance')
             .insert([{
                 student_id: student_id,
@@ -181,6 +177,7 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         
         res.json({ success: true, message: `Marked as ${status}` });
     } catch (err) {
+        console.error('Mark attendance error:', err);
         res.status(500).json({ error: 'Failed to save attendance' });
     }
 });
@@ -210,31 +207,6 @@ app.get('/api/attendance/today', verifyToken, async (req, res) => {
     }
 });
 
-// ========== GET MY ATTENDANCE HISTORY ==========
-app.get('/api/attendance/my-attendance', verifyToken, async (req, res) => {
-    const student_id = req.user.id;
-    
-    try {
-        const { data, error } = await supabase
-            .from('attendance')
-            .select(`
-                attendance_id,
-                date,
-                time,
-                status,
-                courses (course_id, course_name, course_type)
-            `)
-            .eq('student_id', student_id)
-            .order('date', { ascending: false });
-        
-        if (error) throw error;
-        
-        res.json({ success: true, attendance: data });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch history' });
-    }
-});
-
 // ========== ADMIN API ENDPOINTS ==========
 
 // Get all students (admin only)
@@ -261,7 +233,7 @@ app.post('/api/admin/students', verifyToken, verifyAdmin, async (req, res) => {
     }
     
     try {
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('students')
             .insert([{ 
                 student_id: parseInt(student_id), 
@@ -358,9 +330,6 @@ app.use('*', (req, res) => {
 
 // ========== START SERVER ==========
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ HOTCATT Server running on port ${PORT}`);
-    console.log(`📍 API URL: http://localhost:${PORT}`);
 });
-
-module.exports = app;
