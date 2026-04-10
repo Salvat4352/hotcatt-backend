@@ -1,55 +1,73 @@
+/**
+ * AUTHENTICATION ROUTES
+ * 
+ * Handles login for:
+ * - Students (using student_id and PIN)
+ * - Instructors (using email and PIN)
+ * - Admin (using username and password)
+ */
+
 const express = require('express');
 const router = express.Router();
 const supabase = require('../db/supabase');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-console.log("✅ auth.js route file loaded");
-
-// Student login
+// ========== STUDENT LOGIN ==========
+// POST /api/auth/student-login
+// Body: { student_id: number, pin: string }
 router.post('/student-login', async (req, res) => {
     const { student_id, pin } = req.body;
     
-    console.log(`Login attempt: student_id=${student_id}, pin=${pin}`);
-    
+    // Validate input
     if (!student_id || !pin) {
         return res.status(400).json({ error: 'Student ID and PIN required' });
     }
     
     try {
-        // Query the student by student_id
+        // Query database for student
         const { data, error } = await supabase
             .from('students')
             .select('*')
             .eq('student_id', parseInt(student_id))
-            .maybeSingle();
+            .single();
         
-        console.log('Query result:', data ? 'Student found' : 'Student not found');
-        
-        if (error) {
-            console.log('Database error:', error);
-            return res.status(500).json({ error: 'Database error' });
-        }
-        
-        if (!data) {
+        // Check if student exists
+        if (error || !data) {
             return res.status(401).json({ error: 'Invalid student ID or PIN' });
         }
         
-        // Compare PIN (plain text for now)
-        if (data.pin_hash !== pin) {
-            console.log(`PIN mismatch: provided=${pin}, stored=${data.pin_hash}`);
+        // Verify PIN (supports both plain text and hashed)
+        let isValid = false;
+        
+        // For test students with plain text PIN (1234)
+        if (data.pin_hash === '1234' || data.pin_hash === 'temp123') {
+            isValid = (pin === data.pin_hash);
+        } else {
+            // For production with hashed PINs
+            isValid = await bcrypt.compare(pin, data.pin_hash);
+        }
+        
+        if (!isValid) {
             return res.status(401).json({ error: 'Invalid student ID or PIN' });
         }
         
-        // Create JWT token
+        // Generate JWT token
         const token = jwt.sign(
-            { id: data.student_id, role: 'student', name: data.full_name },
+            { 
+                id: data.student_id, 
+                role: 'student', 
+                name: data.full_name,
+                type: 'student' 
+            },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
         
+        // Return success response
         res.json({
             success: true,
-            token: token,
+            token,
             user: {
                 id: data.student_id,
                 name: data.full_name,
@@ -59,16 +77,16 @@ router.post('/student-login', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ error: err.message });
+        console.error('Student login error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Instructor login
+// ========== INSTRUCTOR LOGIN ==========
+// POST /api/auth/instructor-login
+// Body: { email: string, pin: string }
 router.post('/instructor-login', async (req, res) => {
     const { email, pin } = req.body;
-    
-    console.log(`Instructor login attempt: email=${email}`);
     
     if (!email || !pin) {
         return res.status(400).json({ error: 'Email and PIN required' });
@@ -79,57 +97,82 @@ router.post('/instructor-login', async (req, res) => {
             .from('instructors')
             .select('*')
             .eq('email', email)
-            .maybeSingle();
+            .single();
         
         if (error || !data) {
             return res.status(401).json({ error: 'Invalid email or PIN' });
         }
         
-        if (data.pin_hash !== pin) {
+        // Verify PIN
+        let isValid = false;
+        if (data.pin_hash === 'temp123') {
+            isValid = (pin === data.pin_hash);
+        } else {
+            isValid = await bcrypt.compare(pin, data.pin_hash);
+        }
+        
+        if (!isValid) {
             return res.status(401).json({ error: 'Invalid email or PIN' });
         }
         
+        // Get the course assigned to this instructor
+        const { data: courseData } = await supabase
+            .from('courses')
+            .select('course_id, course_name')
+            .eq('instructor_id', data.instructor_id)
+            .single();
+        
         const token = jwt.sign(
-            { id: data.instructor_id, role: 'instructor', name: data.full_name, email: data.email },
+            { 
+                id: data.instructor_id, 
+                role: 'instructor', 
+                name: data.full_name,
+                email: data.email,
+                course_id: courseData?.course_id,
+                type: 'instructor' 
+            },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
         
         res.json({
             success: true,
-            token: token,
+            token,
             user: {
                 id: data.instructor_id,
                 name: data.full_name,
                 email: data.email,
-                role: 'instructor'
+                role: 'instructor',
+                course_id: courseData?.course_id,
+                course_name: courseData?.course_name
             }
         });
     } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ error: err.message });
+        console.error('Instructor login error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Admin login
+// ========== ADMIN LOGIN ==========
+// POST /api/auth/admin-login
+// Body: { username: string, password: string }
 router.post('/admin-login', (req, res) => {
     const { username, password } = req.body;
     
-    console.log(`Admin login attempt: username=${username}`);
-    
+    // Simple hardcoded admin check (change these credentials)
     if (username === 'admin' && password === 'admin123') {
         const token = jwt.sign(
-            { role: 'admin', name: 'Administrator' },
+            { role: 'admin', name: 'Administrator', type: 'admin' },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
         
         res.json({
             success: true,
-            token: token,
-            user: {
-                name: 'Administrator',
-                role: 'admin'
+            token,
+            user: { 
+                name: 'Administrator', 
+                role: 'admin' 
             }
         });
     } else {
